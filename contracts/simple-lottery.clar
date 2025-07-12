@@ -64,7 +64,7 @@
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (asserts! (not (var-get active-lottery)) err-lottery-in-progress)
         (asserts! (> fee u0) err-insufficient-funds)
-        
+
         (map-set lotteries lottery-id {
             entry-fee: fee,
             end-block: (+ stacks-block-height duration),
@@ -72,7 +72,7 @@
             winner: none,
             participant-count: u0
         })
-        
+
         (var-set current-lottery-id lottery-id)
         (var-set active-lottery true)
         (ok true)
@@ -89,26 +89,26 @@
         (asserts! (not (is-participant tx-sender)) err-already-participating)
         (asserts! (<= stacks-block-height (get end-block lottery)) err-lottery-expired)
         ;; (asserts! (< (len current-participants) u50) u100)
-        
+
         (try! (stx-transfer? fee tx-sender (as-contract tx-sender)))
-        
+
         ;; (map-set lottery-participants 
         ;;     (var-get current-lottery-id)
         ;;     (append current-participants tx-sender)
         ;; )
-        
+
         (map-set participant-status 
             {lottery-id: (var-get current-lottery-id), participant: tx-sender}
             true
         )
-        
+
         (map-set lotteries (var-get current-lottery-id)
             (merge lottery {
                 total-pool: (+ (get total-pool lottery) fee),
                 participant-count: (+ (get participant-count lottery) u1)
             })
         )
-        
+
         (ok true)
     )
 )
@@ -122,7 +122,7 @@
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (asserts! (var-get active-lottery) err-no-active-lottery)
         (asserts! (>= stacks-block-height (get end-block lottery)) err-lottery-in-progress)
-        
+
         (match winner winner-principal
             (begin
                 (try! (as-contract (stx-transfer? (get total-pool lottery) tx-sender winner-principal)))
@@ -141,7 +141,7 @@
     (let ((lottery (unwrap! (get-lottery-info) err-no-active-lottery)))
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (asserts! (var-get active-lottery) err-no-active-lottery)
-        
+
         (var-set active-lottery false)
         (ok true)
     )
