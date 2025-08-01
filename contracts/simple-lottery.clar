@@ -6,9 +6,11 @@
 (define-constant err-lottery-in-progress (err u104))
 (define-constant err-lottery-expired (err u105))
 (define-constant err-insufficient-participants (err u106))
+(define-constant operator-fee-percentage u5)
 
 (define-data-var current-lottery-id uint u0)
 (define-data-var active-lottery bool false)
+(define-data-var operator-fees-collected uint u0)
 
 (define-map lotteries uint {
     entry-fee: uint,
@@ -62,6 +64,10 @@
             false
         )
     )
+)
+
+(define-read-only (get-operator-fees)
+    (var-get operator-fees-collected)
 )
 
 (define-private (generate-random-number (seed uint))
@@ -150,10 +156,14 @@
             (let (
                 (winner-index (generate-random-number stacks-block-height))
                 (winner (element-at participants winner-index))
+                (total-pool (get total-pool lottery))
+                (operator-fee (/ (* total-pool operator-fee-percentage) u100))
+                (winner-prize (- total-pool operator-fee))
             )
                 (match winner winner-principal
                     (begin
-                        (try! (as-contract (stx-transfer? (get total-pool lottery) tx-sender winner-principal)))
+                        (try! (as-contract (stx-transfer? winner-prize tx-sender winner-principal)))
+                        (var-set operator-fees-collected (+ (var-get operator-fees-collected) operator-fee))
                         (map-set lotteries (var-get current-lottery-id)
                             (merge lottery {winner: (some winner-principal)})
                         )
@@ -185,6 +195,17 @@
         )
         
         (ok true)
+    )
+)
+
+(define-public (withdraw-operator-fees)
+    (let ((available-fees (var-get operator-fees-collected)))
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (> available-fees u0) err-insufficient-funds)
+
+        (try! (as-contract (stx-transfer? available-fees tx-sender contract-owner)))
+        (var-set operator-fees-collected u0)
+        (ok available-fees)
     )
 )
 
