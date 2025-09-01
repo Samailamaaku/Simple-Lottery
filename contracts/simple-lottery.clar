@@ -7,6 +7,9 @@
 (define-constant err-lottery-expired (err u105))
 (define-constant err-insufficient-participants (err u106))
 (define-constant operator-fee-percentage u5)
+(define-constant first-place-percentage u70)
+(define-constant second-place-percentage u20)
+(define-constant third-place-percentage u10)
 
 (define-data-var current-lottery-id uint u0)
 (define-data-var active-lottery bool false)
@@ -18,7 +21,9 @@
     total-pool: uint,
     winner: (optional principal),
     participant-count: uint,
-    minimum-participants: uint
+    minimum-participants: uint,
+    second-place: (optional principal),
+    third-place: (optional principal)
 })
 
 (define-map lottery-participants uint (list 50 principal))
@@ -70,6 +75,19 @@
     (var-get operator-fees-collected)
 )
 
+(define-read-only (get-lottery-winners (id uint))
+    (let ((lottery (map-get? lotteries id)))
+        (match lottery lottery-data
+            (some {
+                first-place: (get winner lottery-data),
+                second-place: (get second-place lottery-data),
+                third-place: (get third-place lottery-data)
+            })
+            none
+        )
+    )
+)
+
 (define-private (generate-random-number (seed uint))
     (let (
         (current-block-hash (get-stacks-block-info? id-header-hash stacks-block-height))
@@ -97,7 +115,9 @@
             total-pool: u0,
             winner: none,
             participant-count: u0,
-            minimum-participants: min-participants
+            minimum-participants: min-participants,
+            second-place: none,
+            third-place: none
         })
 
         (var-set current-lottery-id lottery-id)
@@ -154,23 +174,65 @@
                 (ok false)
             )
             (let (
-                (winner-index (generate-random-number stacks-block-height))
-                (winner (element-at participants winner-index))
                 (total-pool (get total-pool lottery))
                 (operator-fee (/ (* total-pool operator-fee-percentage) u100))
-                (winner-prize (- total-pool operator-fee))
+                (prize-pool (- total-pool operator-fee))
+                (first-prize (/ (* prize-pool first-place-percentage) u100))
+                (second-prize (/ (* prize-pool second-place-percentage) u100))
+                (third-prize (/ (* prize-pool third-place-percentage) u100))
+                (participant-count (get participant-count lottery))
             )
-                (match winner winner-principal
-                    (begin
-                        (try! (as-contract (stx-transfer? winner-prize tx-sender winner-principal)))
-                        (var-set operator-fees-collected (+ (var-get operator-fees-collected) operator-fee))
-                        (map-set lotteries (var-get current-lottery-id)
-                            (merge lottery {winner: (some winner-principal)})
-                        )
-                        (var-set active-lottery false)
-                        (ok true)
+                (if (>= participant-count u3)
+                    (let (
+                        (winner-index-1 (generate-random-number (+ stacks-block-height u1)))
+                        (winner-index-2 (generate-random-number (+ stacks-block-height u2)))
+                        (winner-index-3 (generate-random-number (+ stacks-block-height u3)))
+                        (first-winner (element-at participants winner-index-1))
+                        (second-winner (element-at participants (if (is-eq winner-index-2 winner-index-1) (mod (+ winner-index-2 u1) participant-count) winner-index-2)))
+                        (third-winner (element-at participants (let ((adjusted-index (if (or (is-eq winner-index-3 winner-index-1) (is-eq winner-index-3 winner-index-2)) (mod (+ winner-index-3 u2) participant-count) winner-index-3))) adjusted-index)))
                     )
-                    err-no-active-lottery
+                        (match first-winner first-principal
+                            (match second-winner second-principal
+                                (match third-winner third-principal
+                                    (begin
+                                        (try! (as-contract (stx-transfer? first-prize tx-sender first-principal)))
+                                        (try! (as-contract (stx-transfer? second-prize tx-sender second-principal)))
+                                        (try! (as-contract (stx-transfer? third-prize tx-sender third-principal)))
+                                        (var-set operator-fees-collected (+ (var-get operator-fees-collected) operator-fee))
+                                        (map-set lotteries (var-get current-lottery-id)
+                                            (merge lottery {
+                                                winner: (some first-principal),
+                                                second-place: (some second-principal),
+                                                third-place: (some third-principal)
+                                            })
+                                        )
+                                        (var-set active-lottery false)
+                                        (ok true)
+                                    )
+                                    err-no-active-lottery
+                                )
+                                err-no-active-lottery
+                            )
+                            err-no-active-lottery
+                        )
+                    )
+                    (let (
+                        (winner-index (generate-random-number stacks-block-height))
+                        (winner (element-at participants winner-index))
+                    )
+                        (match winner winner-principal
+                            (begin
+                                (try! (as-contract (stx-transfer? prize-pool tx-sender winner-principal)))
+                                (var-set operator-fees-collected (+ (var-get operator-fees-collected) operator-fee))
+                                (map-set lotteries (var-get current-lottery-id)
+                                    (merge lottery {winner: (some winner-principal)})
+                                )
+                                (var-set active-lottery false)
+                                (ok true)
+                            )
+                            err-no-active-lottery
+                        )
+                    )
                 )
             )
         )
