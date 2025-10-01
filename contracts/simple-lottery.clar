@@ -28,6 +28,15 @@
 
 (define-map lottery-participants uint (list 50 principal))
 (define-map participant-status {lottery-id: uint, participant: principal} bool)
+(define-map participant-stats principal {
+    total-entries: uint,
+    total-spent: uint,
+    total-wins: uint,
+    total-prize-money: uint,
+    first-place-wins: uint,
+    second-place-wins: uint,
+    third-place-wins: uint
+})
 
 (define-read-only (get-lottery-info)
     (let ((id (var-get current-lottery-id)))
@@ -88,6 +97,55 @@
     )
 )
 
+(define-read-only (get-participant-stats (user principal))
+    (default-to 
+        {
+            total-entries: u0,
+            total-spent: u0,
+            total-wins: u0,
+            total-prize-money: u0,
+            first-place-wins: u0,
+            second-place-wins: u0,
+            third-place-wins: u0
+        }
+        (map-get? participant-stats user)
+    )
+)
+
+(define-private (update-participant-entry (participant principal) (amount uint))
+    (let (
+        (current-stats (get-participant-stats participant))
+    )
+        (map-set participant-stats participant {
+            total-entries: (+ (get total-entries current-stats) u1),
+            total-spent: (+ (get total-spent current-stats) amount),
+            total-wins: (get total-wins current-stats),
+            total-prize-money: (get total-prize-money current-stats),
+            first-place-wins: (get first-place-wins current-stats),
+            second-place-wins: (get second-place-wins current-stats),
+            third-place-wins: (get third-place-wins current-stats)
+        })
+        true
+    )
+)
+
+(define-private (update-participant-win (participant principal) (prize-amount uint) (position uint))
+    (let (
+        (current-stats (get-participant-stats participant))
+    )
+        (map-set participant-stats participant {
+            total-entries: (get total-entries current-stats),
+            total-spent: (get total-spent current-stats),
+            total-wins: (+ (get total-wins current-stats) u1),
+            total-prize-money: (+ (get total-prize-money current-stats) prize-amount),
+            first-place-wins: (if (is-eq position u1) (+ (get first-place-wins current-stats) u1) (get first-place-wins current-stats)),
+            second-place-wins: (if (is-eq position u2) (+ (get second-place-wins current-stats) u1) (get second-place-wins current-stats)),
+            third-place-wins: (if (is-eq position u3) (+ (get third-place-wins current-stats) u1) (get third-place-wins current-stats))
+        })
+        true
+    )
+)
+
 (define-private (generate-random-number (seed uint))
     (let (
         (current-block-hash (get-stacks-block-info? id-header-hash stacks-block-height))
@@ -139,10 +197,7 @@
 
         (try! (stx-transfer? fee tx-sender (as-contract tx-sender)))
 
-        ;; (map-set lottery-participants 
-        ;;     (var-get current-lottery-id)
-        ;;     (append current-participants tx-sender)
-        ;; )
+        (update-participant-entry tx-sender fee)
 
         (map-set participant-status 
             {lottery-id: (var-get current-lottery-id), participant: tx-sender}
@@ -198,6 +253,9 @@
                                         (try! (as-contract (stx-transfer? first-prize tx-sender first-principal)))
                                         (try! (as-contract (stx-transfer? second-prize tx-sender second-principal)))
                                         (try! (as-contract (stx-transfer? third-prize tx-sender third-principal)))
+                                        (update-participant-win first-principal first-prize u1)
+                                        (update-participant-win second-principal second-prize u2)
+                                        (update-participant-win third-principal third-prize u3)
                                         (var-set operator-fees-collected (+ (var-get operator-fees-collected) operator-fee))
                                         (map-set lotteries (var-get current-lottery-id)
                                             (merge lottery {
@@ -223,6 +281,7 @@
                         (match winner winner-principal
                             (begin
                                 (try! (as-contract (stx-transfer? prize-pool tx-sender winner-principal)))
+                                (update-participant-win winner-principal prize-pool u1)
                                 (var-set operator-fees-collected (+ (var-get operator-fees-collected) operator-fee))
                                 (map-set lotteries (var-get current-lottery-id)
                                     (merge lottery {winner: (some winner-principal)})
