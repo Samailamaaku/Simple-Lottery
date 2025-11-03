@@ -339,3 +339,32 @@
         (ok true)
     )
 )
+
+(define-public (leave-lottery)
+    (let (
+        (lottery (unwrap! (get-lottery-info) err-no-active-lottery))
+        (participating (is-participant tx-sender))
+    )
+        (asserts! (var-get active-lottery) err-no-active-lottery)
+        (asserts! participating err-already-participating)
+        (asserts! (<= stacks-block-height (get end-block lottery)) err-lottery-expired)
+        (let (
+            (fee (get entry-fee lottery))
+            (count (get participant-count lottery))
+        )
+            (asserts! (> count u0) err-insufficient-participants)
+            (try! (as-contract (stx-transfer? fee tx-sender tx-sender)))
+            (map-set participant-status 
+                {lottery-id: (var-get current-lottery-id), participant: tx-sender}
+                false
+            )
+            (map-set lotteries (var-get current-lottery-id)
+                (merge lottery {
+                    total-pool: (- (get total-pool lottery) fee),
+                    participant-count: (- count u1)
+                })
+            )
+            (ok true)
+        )
+    )
+)
